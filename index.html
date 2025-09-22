@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PhotoProfile</title>
+    <script src="./exif-reader.js"></script>
+    <style>
+        @font-face {
+            font-family: consola;
+            src: url("./consola.ttf");
+        }
+        body {
+            font-family: consola;
+            text-align: center;
+            margin: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #444;
+            gap: 32px;
+        }
+
+        #photoCanvas {
+            border: 1px solid #ccc;
+            width: min(60vh, 60vw);
+            height: min(60vh, 60vw);
+        }
+    </style>
+</head>
+
+<body>
+    <h1>PhotoProfile</h1>
+    <input type="file" id="upload" accept="image/*">
+    <canvas id="photoCanvas"></canvas>
+    <button id="downloadBtn">Download Image</button>
+    <script>
+        const upload = document.getElementById('upload');
+        const canvas = document.getElementById('photoCanvas');
+        const ctx = canvas.getContext('2d');
+        const canvasWidth = 1800;
+        const canvasHeight = 1800;
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+
+        const imageStartY = 150; // 图片绘制的起始Y坐标
+        const blurRadius = 20; // 模糊半径
+        const fontSize = 64; // EXIF信息字体大小
+        const brightness = 0.6; // 背景亮度
+
+        const getDate = (dateString) => {
+            console.log(dateString);
+            const formattedString = dateString.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1/$2/$3');
+            const date = new Date(formattedString);
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+        const photoExif = async (file) => {
+            const arrayBuffer = await file.arrayBuffer();
+            const exif = await ExifReader.load(arrayBuffer);
+            let basicInfo = {
+                make: exif.Make ? exif.Make.description : 'N/A',
+                aperture: exif.FNumber ? exif.FNumber.description : 'N/A',
+                shutterSpeed: exif.ExposureTime ? `${exif.ExposureTime.description}s` : 'N/A',
+                iso: exif.ISOSpeedRatings ? exif.ISOSpeedRatings.description : 'N/A',
+                focalLength: exif.FocalLength ? exif.FocalLength.description : 'N/A',
+                focalLength35efl: exif.FocalLength35efl ? exif.FocalLength35efl.description.split(' ').join('') : 'N/A',
+                DateTimeOriginal: exif.DateTimeOriginal ? getDate(exif.DateTimeOriginal.description) : 'N/A',
+            }
+            let exifInfo = {
+                make: {
+                    chineseName: '相机品牌',
+                    value: basicInfo.make
+                },
+                photoInfo: {
+                    chineseName: '拍摄信息',
+                    value: `${basicInfo.focalLength35efl}   ${basicInfo.aperture}   ${basicInfo.shutterSpeed}   ISO${basicInfo.iso}`,
+                },
+                date: {
+                    chineseName: '拍摄日期',
+                    value: basicInfo.DateTimeOriginal
+                },
+                fileInfo: {
+                    chineseName: '文件信息',
+                    value: {
+                        size: `${(file.size / 1024).toFixed(2)} KB`,
+                        type: file.type,
+                        name: file.name.split('.')[0]
+                    }
+                }
+            };
+            return exifInfo;
+        };
+        const drawExifInfo = (info, imageHeight) => {
+            ctx.fillStyle = '#FFF';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+
+            //make 显示相机品牌
+            ctx.font = '96px consola';
+            ctx.fillText(`${info['make'].value}`, canvasWidth / 2, canvasHeight - 96 - 64);
+
+            //photoInfo 显示拍摄信息
+            ctx.font = '64px consola';
+            ctx.fillText(`${info['photoInfo'].value}`, canvasWidth / 2, canvasHeight - 64);
+
+            //date 显示拍摄日期
+            //ctx.fillText(`${info['date'].value}`, canvasWidth / 2, imageHeight + imageStartY + fontSize + 2 * (fontSize + 16));
+
+        };
+        let drawCanvas = (file, info) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    // 清空画布
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.filter = `blur(${blurRadius}px) brightness(${brightness}) opacity(1)`; // 设置模糊和亮度效果
+                    // 绘制模糊背景，填满整个canvas
+                    ctx.drawImage(img, -blurRadius, -blurRadius, canvasWidth + 2 * blurRadius, canvasHeight + 2 * blurRadius);
+                    ctx.filter = 'none'; // 取消模糊效果
+
+                    // 计算图片绘制尺寸，保持宽度为canvas宽度，高度按比例缩放
+                    let imageWidth = canvasWidth;
+                    let imageHeight = imageWidth * (img.height / img.width);
+                    ctx.drawImage(img, 0, imageStartY, imageWidth, imageHeight);
+                    drawExifInfo(info, imageHeight);
+
+                    //ctx.strokeStyle = '#FFF'; // 白色边框
+                    //ctx.lineWidth = 16; // 边框宽度
+                    //ctx.strokeRect(0, 0, canvasWidth, canvasHeight); // x, y, width, height
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        };
+        let info = null;
+        let file = null;
+        upload.addEventListener('change', async (event) => {
+            file = event.target.files[0]; if (!file) return;
+
+            try {
+                // 读取ArrayBuffer以解析EXIF
+                info = await photoExif(file);
+                // 继续读取图片并绘制（使用readAsDataURL）
+                drawCanvas(file, info);
+            } catch (error) {
+                console.error('EXIF解析失败:', error);
+            }
+        });
+        const downloadBtn = document.getElementById('downloadBtn');
+        downloadBtn.addEventListener('click', () => {
+            if (!file || !info) return alert('请先上传图片');
+            const link = document.createElement('a');
+            link.download = `PhotoProfile-${info['fileInfo'].value.name}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        });
+    </script>
+</body>
+
+</html>
